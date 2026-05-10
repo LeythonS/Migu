@@ -261,17 +261,28 @@ def summary():
 
     system = platform.system()
     if system == "Windows":
+        print(f"  {cyan('Fast')} Run the bot:")
+        print(f"          python run.py")
+        print()
+        print(f"  {cyan('Manual')} Run the bot manually:")
+        print()
         print(f"  {cyan('Step 1:')} Open a terminal and start ngrok:")
         print(f"          ngrok http --url=your-domain.ngrok-free.app 8888")
         print()
         print(f"  {cyan('Step 2:')} Open another terminal and run the bot:")
         print(f"          python migu.py")
     else:
+        print(f"  {cyan('Fast')} Run the bot:")
+        print(f"          python3 run.py")
+        print()
+        print(f"  {cyan('Manual')} Run the bot manually:")
+        print()
         print(f"  {cyan('Step 1:')} Start ngrok in a separate terminal:")
         print(f"          ngrok http --url=your-domain.ngrok-free.app 8888")
         print()
         print(f"  {cyan('Step 2:')} Run the bot:")
         print(f"          python3 migu.py")
+        print()
 
     print()
     print(f"  {bold('Need help?')}")
