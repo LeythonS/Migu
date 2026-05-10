@@ -1,11 +1,13 @@
 <img width="1920" height="710" alt="migu" src="https://github.com/user-attachments/assets/e225ab77-bf51-4bfd-93b3-1e2c364f2ac7" />
 
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/saypi)
-![GitHub stars](https://img.shields.io/github/stars/LeythonS/Migu?style=flat-square)
-![Last commit](https://img.shields.io/github/last-commit/LeythonS/Migu?style=flat-square)
-![Issues](https://img.shields.io/github/issues/LeythonS/Migu?style=flat-square)
-![Forks](https://img.shields.io/github/forks/LeythonS/Migu?style=flat-square)
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)
+
+![Stars](https://img.shields.io/github/stars/LeythonS/Migu?style=flat-square&color=1DB954)
+![Forks](https://img.shields.io/github/forks/LeythonS/Migu?style=flat-square&color=1DB954)
+![Last Commit](https://img.shields.io/github/last-commit/LeythonS/Migu?style=flat-square&color=1DB954)
+![Issues](https://img.shields.io/github/issues/LeythonS/Migu?style=flat-square&color=1DB954)
+![Python](https://img.shields.io/badge/Python-3.10%2B-1DB954?style=flat-square)
+![License](https://img.shields.io/github/license/LeythonS/Migu?style=flat-square&color=1DB954)
 
 # Migu (Discord Music Bot)
 
