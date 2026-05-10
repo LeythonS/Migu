@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import tasks
 import asyncio
 import os
+import subprocess
 import yt_dlp
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -26,6 +27,61 @@ SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
 #  GitHub : https://github.com/LeythonS/
 #  Ko-fi  : https://ko-fi.com/saypi
 # ──────────────────────────────────────────────
+
+GITHUB_REPO = "LeythonS/Migu"
+GITHUB_API  = f"https://api.github.com/repos/{GITHUB_REPO}/commits/main"
+
+def get_local_commit():
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+async def check_for_updates(admin_user: discord.User = None):
+    local = get_local_commit()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(GITHUB_API, headers={"Accept": "application/vnd.github+json"}) as resp:
+                if resp.status != 200:
+                    return
+                data = await resp.json()
+                remote = data.get("sha")
+                if not remote:
+                    return
+
+        if local and remote.startswith(local[:7]):
+            print("✓ Migu is up to date.")
+            return
+
+        short = remote[:7]
+        msg = data.get("commit", {}).get("message", "").splitlines()[0]
+        print("━" * 48)
+        print("⚠  A new update is available for Migu!")
+        print(f"   Latest commit : {short} — {msg}")
+        print("   Run: git pull")
+        print("━" * 48)
+
+        if admin_user:
+            embed = discord.Embed(
+                title="⚠️ Migu Update Available",
+                description=(
+                    f"A new commit has been pushed to the repository.\n\n"
+                    f"**Latest:** `{short}` — {msg}\n\n"
+                    f"Run `git pull` in your Migu folder to update."
+                ),
+                color=0xf0a500
+            )
+            embed.set_footer(text="github.com/LeythonS/Migu")
+            try:
+                await admin_user.send(embed=embed)
+            except discord.Forbidden:
+                print("  Could not DM admin — DMs may be disabled.")
+    except Exception as e:
+        print(f"Update check failed: {e}")
 
 class Bot(discord.Client):
     def __init__(self):
@@ -160,6 +216,8 @@ async def end_session(guild: discord.Guild):
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
+    admin_user = await bot.fetch_user(ADMIN_ID)
+    await check_for_updates(admin_user)
 
 @tasks.loop(seconds=2)
 async def spotify_poll(vc):

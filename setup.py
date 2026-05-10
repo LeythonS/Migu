@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
 
-# ──────────────────────────────────────────────
-#  Migu Setup Script
-#  Developed by Saypi
-#  GitHub  : https://github.com/LeythonS/
-#  Ko-fi   : https://ko-fi.com/saypi
-#  Discord : saypi.cyefi
-# ──────────────────────────────────────────────
-
 import os
 import sys
 import platform
 import subprocess
 import shutil
 
-# ── Colors (disabled on Windows if no ANSI support) ──
 USE_COLOR = platform.system() != "Windows" or os.environ.get("TERM")
 
 def c(text, code):
@@ -25,8 +16,6 @@ def yellow(t): return c(t, "93")
 def red(t):    return c(t, "91")
 def cyan(t):   return c(t, "96")
 def bold(t):   return c(t, "1")
-
-# ── Helpers ──────────────────────────────────
 
 def header():
     print()
@@ -81,8 +70,6 @@ def run(cmd, check=True, capture=False):
 
 def command_exists(cmd):
     return shutil.which(cmd) is not None
-
-# ── Checks ───────────────────────────────────
 
 TOTAL_STEPS = 6
 
@@ -142,7 +129,6 @@ def install_dependencies():
     system = platform.system()
     pip_cmd = "pip" if command_exists("pip") else "pip3"
 
-    # Use --break-system-packages on Linux to avoid venv requirement errors
     extra = " --break-system-packages" if system == "Linux" else ""
 
     result = run(f"{pip_cmd} install -r requirements.txt{extra}", check=False)
@@ -152,7 +138,16 @@ def install_dependencies():
         sys.exit(1)
     ok("All dependencies installed.")
 
-# ── .env Setup ───────────────────────────────
+def ask_validated(prompt, validator, error_msg, default=None):
+    while True:
+        val = ask(prompt, default=default)
+        if not val:
+            warn("This field is required.")
+            continue
+        if validator(val):
+            return val
+        warn(error_msg)
+        warn("Try again.")
 
 def setup_env():
     step(4, TOTAL_STEPS, "Setting up .env file...")
@@ -163,8 +158,7 @@ def setup_env():
         if not confirm("Overwrite it with new values?"):
             ok("Keeping existing .env.")
             return
-        # Read existing values to use as defaults
-        with open(".env") as f:
+        with open(".env", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
@@ -174,30 +168,61 @@ def setup_env():
     print()
     print(f"  {bold('Discord Bot Token')}")
     print(f"  Get it from: https://discord.com/developers/applications → Bot → Token")
-    discord_token = ask_required("DISCORD_TOKEN")
+    print(f"  Format: a long string with two dots, e.g. MTExxx.Yyyyyy.Zzzzzzz")
+    discord_token = ask_validated(
+        "DISCORD_TOKEN",
+        lambda v: len(v) > 50 and v.count(".") >= 2,
+        "That doesn't look like a valid bot token. It should be a long string with at least two dots."
+    )
 
     print()
     print(f"  {bold('Your Discord User ID')} (for admin commands)")
     print(f"  Enable Developer Mode in Discord settings → right-click your name → Copy User ID")
-    admin_id = ask_required("ADMIN_ID")
+    print(f"  Format: numbers only, e.g. 123456789012345678")
+    admin_id = ask_validated(
+        "ADMIN_ID",
+        lambda v: v.isdigit() and 17 <= len(v) <= 20,
+        "Admin ID must be a numeric Discord snowflake (17–20 digits). Right-click your name in Discord → Copy User ID."
+    )
 
     print()
     print(f"  {bold('Text channel name')} where Now Playing messages will appear")
-    text_channel = ask("TEXT_CHANNEL_NAME", default=existing.get("TEXT_CHANNEL_NAME", "now-playing"))
+    print(f"  Format: lowercase, no spaces (use hyphens), e.g. now-playing")
+    text_channel = ask_validated(
+        "TEXT_CHANNEL_NAME",
+        lambda v: v == v.lower() and " " not in v and all(c.isalnum() or c == "-" for c in v),
+        "Channel name must be lowercase with no spaces. Use hyphens instead (e.g. now-playing).",
+        default=existing.get("TEXT_CHANNEL_NAME", "now-playing")
+    )
 
     print()
     print(f"  {bold('Spotify Developer App')}")
     print(f"  Create one at: https://developer.spotify.com/dashboard")
-    spotify_client_id = ask_required("SPOTIFY_CLIENT_ID")
-    spotify_client_secret = ask_required("SPOTIFY_CLIENT_SECRET")
+    print(f"  Format: 32 character string of letters and numbers")
+    spotify_client_id = ask_validated(
+        "SPOTIFY_CLIENT_ID",
+        lambda v: len(v) == 32 and all(c.isalnum() for c in v),
+        "Spotify Client ID must be exactly 32 alphanumeric characters. Copy it from your Spotify Developer Dashboard."
+    )
+
+    print()
+    print(f"  Format: 32 character string of letters and numbers")
+    spotify_client_secret = ask_validated(
+        "SPOTIFY_CLIENT_SECRET",
+        lambda v: len(v) == 32 and all(c.isalnum() for c in v),
+        "Spotify Client Secret must be exactly 32 alphanumeric characters. Copy it from your Spotify Developer Dashboard."
+    )
 
     print()
     print(f"  {bold('Spotify Redirect URI')} (your ngrok callback URL)")
     print(f"  Format: https://your-domain.ngrok-free.app/callback")
-    spotify_redirect_uri = ask_required("SPOTIFY_REDIRECT_URI")
+    spotify_redirect_uri = ask_validated(
+        "SPOTIFY_REDIRECT_URI",
+        lambda v: v.startswith("https://") and v.endswith("/callback"),
+        "Redirect URI must start with https:// and end with /callback — e.g. https://your-domain.ngrok-free.app/callback"
+    )
 
     env_content = f"""# Migu Environment Variables
-# Generated by setup.py — https://github.com/LeythonS/Migu
 
 DISCORD_TOKEN={discord_token}
 ADMIN_ID={admin_id}
@@ -211,8 +236,6 @@ SPOTIFY_REDIRECT_URI={spotify_redirect_uri}
         f.write(env_content)
 
     ok(".env file created successfully.")
-
-# ── ngrok Check ──────────────────────────────
 
 def check_ngrok():
     step(5, TOTAL_STEPS, "Checking ngrok...")
@@ -229,8 +252,6 @@ def check_ngrok():
     print("  5. Run: ngrok config add-authtoken YOUR_TOKEN")
     print()
     warn("ngrok is required for Spotify OAuth to work.")
-
-# ── Summary ──────────────────────────────────
 
 def summary():
     step(6, TOTAL_STEPS, "Setup complete!")
@@ -260,8 +281,6 @@ def summary():
     print()
     print(cyan("══════════════════════════════════════════"))
     print()
-
-# ── Entry Point ──────────────────────────────
 
 def main():
     header()
