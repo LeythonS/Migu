@@ -207,7 +207,7 @@ SPOTIFY_CLIENT_SECRET={spotify_client_secret}
 SPOTIFY_REDIRECT_URI={spotify_redirect_uri}
 """
 
-    with open(".env", "w") as f:
+    with open(".env", "w", encoding="utf-8") as f:
         f.write(env_content)
 
     ok(".env file created successfully.")
