@@ -10,14 +10,50 @@ A Discord bot that streams any user's Spotify into a voice channel via YouTube. 
 
 1. A user runs `/join` in Discord
 2. The bot sends them a private Spotify login link
-3. They authorize the bot joins their voice channel and starts streaming whatever they're playing on Spotify
+3. They authorize — the bot joins their voice channel and starts streaming whatever they're playing on Spotify
 4. When they're done, they run `/leave` to end the session and free the bot for someone else
 
-Audio is sourced from YouTube to match what's playing on Spotify, so **Spotify Premium is not required to listen** only the person sharing their session needs it for playback control.
+Audio is sourced from YouTube to match what's playing on Spotify, so **Spotify Premium is not required to listen** — only the person sharing their session needs it for playback control.
 
 ---
 
-## Requirements
+## Quick Setup (Recommended)
+
+The easiest way to get started is with the included setup script. It handles dependencies, FFmpeg detection, and walks you through creating your `.env` file interactively.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/LeythonS/Migu.git
+cd Migu
+```
+
+### 2. Run the setup script
+
+**Windows**
+```bash
+python setup.py
+```
+
+**Linux / macOS**
+```bash
+python3 setup.py
+```
+
+The script will:
+- Check your Python version
+- Detect and install FFmpeg if missing (Linux/macOS)
+- Install all Python dependencies from `requirements.txt`
+- Walk you through filling in your `.env` file step by step
+- Check for ngrok and guide you if it's not installed
+
+---
+
+## Manual Setup
+
+Prefer to do it yourself? Follow the steps below.
+
+### Requirements
 
 - Python 3.10+
 - FFmpeg
@@ -25,15 +61,11 @@ Audio is sourced from YouTube to match what's playing on Spotify, so **Spotify P
 - A Discord bot application
 - ngrok (for OAuth callbacks)
 
----
-
-## Setup
-
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/yourusername/migu.git
-cd migu
+git clone https://github.com/LeythonS/Migu.git
+cd Migu
 ```
 
 ### 2. Install FFmpeg
@@ -53,14 +85,11 @@ sudo apt install ffmpeg
 brew install ffmpeg
 ```
 
-**Windows**
-Download from https://ffmpeg.org and add to PATH.
+**Windows** — Download from https://ffmpeg.org and add to PATH.
 
 ### 3. Install Python dependencies
 
 ```bash
-python -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -103,11 +132,7 @@ ngrok config add-authtoken your_authtoken_here
 
 ### 7. Configure environment variables
 
-```bash
-cp .env.example .env
-```
-
-Open `.env` and fill in your values:
+Create a `.env` file in the project root:
 
 ```env
 DISCORD_TOKEN=your_discord_bot_token
@@ -141,7 +166,7 @@ python migu.py
 ## Commands
 
 | Command | Description | Access |
-|---|---|---|
+| --- | --- | --- |
 | `/join` | Start a session with your Spotify | Anyone |
 | `/leave` | End the current session | Session owner or Admin |
 | `/play` | Resume Spotify playback | Session owner or Admin |
@@ -154,13 +179,24 @@ python migu.py
 | `/nowplaying` | Show the current track | Anyone |
 | `/session` | Show who has an active session | Anyone |
 | `/ping` | Check bot latency | Anyone |
+| `/support` | Support the developer & view links | Anyone |
 
 ---
 
 ## Notes
 
 - Spotify limits development apps to **5 whitelisted users**. Each person who wants to use `/join` must have their Spotify email added under User Management in your Spotify Developer Dashboard.
-- If you self-host this bot, you create your own Spotify app with your own set of 5 users and the limit is per app, not per bot.
+- If you self-host this bot, you create your own Spotify app with your own set of 5 users — the limit is per app, not per bot.
 - User tokens are kept in memory only and cleared when the session ends. No credentials are ever stored to disk.
 - There is a natural delay of 2–5 seconds when switching tracks due to YouTube search and FFmpeg startup time.
 - The bot seeks to your current position in the song when a new track is detected to stay as close to in sync as possible.
+
+---
+
+## Support
+
+If you enjoy Migu, consider supporting development!
+
+☕ **Ko-fi** — [ko-fi.com/saypi](https://ko-fi.com/saypi)
+💻 **GitHub** — [github.com/LeythonS](https://github.com/LeythonS/)
+💬 **Discord** — saypi.cyefi
