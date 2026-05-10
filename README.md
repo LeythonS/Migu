@@ -1,5 +1,6 @@
 <img width="1920" height="710" alt="migu" src="https://github.com/user-attachments/assets/e225ab77-bf51-4bfd-93b3-1e2c364f2ac7" />
 
+
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/saypi)
 
 ![Stars](https://img.shields.io/github/stars/LeythonS/Migu?style=flat-square&color=1DB954)
