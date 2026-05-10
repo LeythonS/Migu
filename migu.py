@@ -97,16 +97,7 @@ now_playing_message = None
 pending_auths = {}
 is_loading_track = False
 
-def create_sp(token_info):
-    auth_manager = SpotifyOAuth(
-        client_id=SPOTIFY_CLIENT_ID,
-        client_secret=SPOTIFY_CLIENT_SECRET,
-        redirect_uri=SPOTIFY_REDIRECT_URI,
-        scope="user-read-playback-state user-read-currently-playing user-modify-playback-state"
-    )
-    auth_manager.token_info = token_info
-    sp = spotipy.Spotify(auth_manager=auth_manager)
-    return sp
+
 
 def format_time(seconds):
     seconds = int(seconds)
@@ -121,7 +112,7 @@ def build_progress_bar(progress_s, duration_s, length=14):
     bar = "─" * pos + "●" + "─" * (length - pos)
     return f"▶ {bar} {format_time(progress_s)} / {format_time(duration_s)}"
 
-def embed_now_playing(title, artist, paused=False, owner=None, progress_s=0, duration_s=0):
+def embed_now_playing(title, artist, paused=False, owner=None, progress_s=0, duration_s=0, album_art=None):
     bar = build_progress_bar(progress_s, duration_s)
     description = f"**{title}**\n{artist}"
     if bar:
@@ -132,6 +123,8 @@ def embed_now_playing(title, artist, paused=False, owner=None, progress_s=0, dur
         description=description,
         color=0x808080 if paused else 0x1DB954
     )
+    if album_art:
+        embed.set_thumbnail(url=album_art)
     if owner:
         embed.set_footer(text=f"Session by {owner.display_name} · Streaming via Spotify → YouTube · ☕ ko-fi.com/saypi", icon_url=owner.display_avatar.url)
     else:
@@ -169,10 +162,14 @@ def get_spotify_state():
         playback = session_sp.current_playback()
         if playback and playback["item"]:
             track = playback["item"]
+            images = track.get("album", {}).get("images", [])
+            album_art = images[0]["url"] if images else None
             return {
                 "id": track["id"],
                 "title": track["name"],
                 "artist": track["artists"][0]["name"],
+                "album": track.get("album", {}).get("name", ""),
+                "album_art": album_art,
                 "is_playing": playback["is_playing"],
                 "progress_s": playback["progress_ms"] / 1000,
                 "duration_s": track["duration_ms"] / 1000,
@@ -230,7 +227,7 @@ async def purge_now_playing_messages(text_channel):
     except Exception:
         pass
 
-async def send_now_playing(title, artist, paused=False, progress_s=0, duration_s=0):
+async def send_now_playing(title, artist, paused=False, progress_s=0, duration_s=0, album_art=None):
     global now_playing_message
     owner = bot.get_user(session_owner_id) if session_owner_id else None
     vc_channel = bot.get_channel(session_voice_channel_id)
@@ -240,7 +237,7 @@ async def send_now_playing(title, artist, paused=False, progress_s=0, duration_s
     if not text_channel:
         return
     await update_presence(title, artist, paused)
-    embed = embed_now_playing(title, artist, paused, owner=owner, progress_s=progress_s, duration_s=duration_s)
+    embed = embed_now_playing(title, artist, paused, owner=owner, progress_s=progress_s, duration_s=duration_s, album_art=album_art)
     if now_playing_message:
         try:
             await now_playing_message.edit(embed=embed)
@@ -297,15 +294,15 @@ async def spotify_poll(vc):
         if not state["is_playing"] and vc.is_playing():
             vc.pause()
             is_spotify_paused = True
-            await send_now_playing(state["title"], state["artist"], paused=True, progress_s=state["progress_s"], duration_s=state["duration_s"])
+            await send_now_playing(state["title"], state["artist"], paused=True, progress_s=state["progress_s"], duration_s=state["duration_s"], album_art=state.get("album_art"))
         elif state["is_playing"] and vc.is_paused() and is_spotify_paused:
             vc.resume()
             is_spotify_paused = False
-            await send_now_playing(state["title"], state["artist"], paused=False, progress_s=state["progress_s"], duration_s=state["duration_s"])
+            await send_now_playing(state["title"], state["artist"], paused=False, progress_s=state["progress_s"], duration_s=state["duration_s"], album_art=state.get("album_art"))
         elif state["is_playing"] and now_playing_message:
             owner = bot.get_user(session_owner_id) if session_owner_id else None
             try:
-                await now_playing_message.edit(embed=embed_now_playing(state["title"], state["artist"], paused=False, owner=owner, progress_s=state["progress_s"], duration_s=state["duration_s"]))
+                await now_playing_message.edit(embed=embed_now_playing(state["title"], state["artist"], paused=False, owner=owner, progress_s=state["progress_s"], duration_s=state["duration_s"], album_art=state.get("album_art")))
             except Exception:
                 pass
         return
@@ -330,7 +327,7 @@ async def spotify_poll(vc):
             discord.FFmpegPCMAudio(url, before_options=f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {seek_seconds}", options="-vn"),
             after=lambda e: print(f"Playback error: {e}") if e else None
         )
-        await send_now_playing(state["title"], state["artist"], progress_s=state["progress_s"], duration_s=state["duration_s"])
+        await send_now_playing(state["title"], state["artist"], progress_s=state["progress_s"], duration_s=state["duration_s"], album_art=state.get("album_art"))
     except Exception as e:
         current_track_id = None
     finally:
@@ -347,6 +344,7 @@ async def join(interaction: discord.Interaction):
         name = owner.display_name if owner else "someone"
         await interaction.response.send_message(embed=embed_error(f"A session is already active by **{name}**. Wait for them to end it with `/leave`."), ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)
     state_token = secrets.token_urlsafe(16)
     pending_auths[state_token] = {
         "user_id": interaction.user.id,
@@ -361,14 +359,14 @@ async def join(interaction: discord.Interaction):
         state=state_token,
         show_dialog=True
     )
-    auth_url = auth_manager.get_authorize_url()
+    auth_url = await asyncio.get_event_loop().run_in_executor(None, auth_manager.get_authorize_url)
     embed = discord.Embed(
         title="Spotify Authorization Required",
         description=f"[Click here to connect your Spotify]({auth_url})\n\nThis link is personal and expires shortly. Do not share it.",
         color=0x1DB954
     )
     embed.set_footer(text="You will be redirected back automatically after authorizing.")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="leave", description="End your session and disconnect the bot.")
 async def leave(interaction: discord.Interaction):
@@ -460,7 +458,7 @@ async def shuffle(interaction: discord.Interaction):
         return
     await interaction.response.defer(ephemeral=True)
     try:
-        state = get_spotify_state()
+        state = await asyncio.get_event_loop().run_in_executor(None, get_spotify_state)
         if not state:
             await interaction.followup.send(embed=embed_error("Nothing is playing on Spotify."), ephemeral=True)
             return
@@ -480,7 +478,7 @@ async def repeat(interaction: discord.Interaction):
         return
     await interaction.response.defer(ephemeral=True)
     try:
-        state = get_spotify_state()
+        state = await asyncio.get_event_loop().run_in_executor(None, get_spotify_state)
         if not state:
             await interaction.followup.send(embed=embed_error("Nothing is playing on Spotify."), ephemeral=True)
             return
@@ -503,7 +501,7 @@ async def volume(interaction: discord.Interaction, level: int = None):
         return
     await interaction.response.defer(ephemeral=True)
     if level is None:
-        state = get_spotify_state()
+        state = await asyncio.get_event_loop().run_in_executor(None, get_spotify_state)
         if state:
             await interaction.followup.send(embed=embed_info(f"Current volume: **{state['volume']}%**"), ephemeral=True)
         else:
@@ -523,12 +521,13 @@ async def nowplaying(interaction: discord.Interaction):
     if session_owner_id is None:
         await interaction.response.send_message(embed=embed_error("No active session. Use `/join` to start one."), ephemeral=True)
         return
-    state = get_spotify_state()
+    await interaction.response.defer()
+    state = await asyncio.get_event_loop().run_in_executor(None, get_spotify_state)
     if state:
         owner = bot.get_user(session_owner_id)
-        await interaction.response.send_message(embed=embed_now_playing(state["title"], state["artist"], paused=not state["is_playing"], owner=owner))
+        await interaction.followup.send(embed=embed_now_playing(state["title"], state["artist"], paused=not state["is_playing"], owner=owner, progress_s=state["progress_s"], duration_s=state["duration_s"], album_art=state.get("album_art")))
     else:
-        await interaction.response.send_message(embed=embed_error("Nothing is currently playing on Spotify."), ephemeral=True)
+        await interaction.followup.send(embed=embed_error("Nothing is currently playing on Spotify."), ephemeral=True)
 
 @bot.tree.command(name="session", description="Show who currently has an active session.")
 async def session(interaction: discord.Interaction):
@@ -591,7 +590,14 @@ async def handle_callback(request):
     except Exception as e:
         print(f"Token exchange error: {e}")
         return web.Response(text="Failed to authenticate with Spotify. Please try again.", content_type="text/html")
-    sp_user = spotipy.Spotify(auth=token_info["access_token"])
+    auth_manager_refresh = SpotifyOAuth(
+        client_id=SPOTIFY_CLIENT_ID,
+        client_secret=SPOTIFY_CLIENT_SECRET,
+        redirect_uri=SPOTIFY_REDIRECT_URI,
+        scope="user-read-playback-state user-read-currently-playing user-modify-playback-state"
+    )
+    sp_user = spotipy.Spotify(auth_manager=auth_manager_refresh)
+    sp_user.auth_manager.token_info = token_info
     session_sp = sp_user
     session_owner_id = user_id
     session_voice_channel_id = voice_channel_id
@@ -611,11 +617,13 @@ async def handle_callback(request):
             embed = embed_success(f"Session started. Streaming **{owner.display_name}'s** Spotify to **{channel.name}**.\nUse `/leave` to end the session.")
             embed.set_footer(text="Enjoying Migu? Support the dev · ☕ ko-fi.com/saypi")
             msg = await text_channel.send(embed=embed)
-            await asyncio.sleep(10)
-            try:
-                await msg.delete()
-            except (discord.NotFound, discord.Forbidden):
-                pass
+            async def _delete_later(m):
+                await asyncio.sleep(10)
+                try:
+                    await m.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+            asyncio.create_task(_delete_later(msg))
     return web.Response(
         text="<html><body style='font-family:sans-serif;text-align:center;padding-top:80px;background:#111;color:#fff'><h2 style='color:#1DB954'>✓ Connected to Spotify</h2><p>You can close this tab and return to Discord.</p></body></html>",
         content_type="text/html"
