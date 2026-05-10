@@ -20,14 +20,6 @@ SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
 
-# ──────────────────────────────────────────────
-#  Credits
-#  Developed by Saypi
-#  Discord: saypi.cyefi
-#  GitHub : https://github.com/LeythonS/
-#  Ko-fi  : https://ko-fi.com/saypi
-# ──────────────────────────────────────────────
-
 GITHUB_REPO = "LeythonS/Migu"
 GITHUB_API  = f"https://api.github.com/repos/{GITHUB_REPO}/commits/main"
 
@@ -44,8 +36,8 @@ def get_local_commit():
 async def check_for_updates(admin_user: discord.User = None):
     local = get_local_commit()
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(GITHUB_API, headers={"Accept": "application/vnd.github+json"}) as resp:
+        async with aiohttp.ClientSession(headers={"Accept": "application/vnd.github+json"}) as session:
+            async with session.get(GITHUB_API) as resp:
                 if resp.status != 200:
                     return
                 data = await resp.json()
@@ -85,7 +77,9 @@ async def check_for_updates(admin_user: discord.User = None):
 
 class Bot(discord.Client):
     def __init__(self):
-        super().__init__(intents=discord.Intents.default())
+        intents = discord.Intents.default()
+        intents.presences = True
+        super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
@@ -101,6 +95,7 @@ current_track_id = None
 is_spotify_paused = False
 now_playing_message = None
 pending_auths = {}
+is_loading_track = False
 
 def create_sp(token_info):
     auth_manager = SpotifyOAuth(
@@ -113,10 +108,28 @@ def create_sp(token_info):
     sp = spotipy.Spotify(auth_manager=auth_manager)
     return sp
 
-def embed_now_playing(title, artist, paused=False, owner: discord.User = None):
+def format_time(seconds):
+    seconds = int(seconds)
+    m, s = divmod(seconds, 60)
+    return f"{m}:{s:02d}"
+
+def build_progress_bar(progress_s, duration_s, length=14):
+    if duration_s <= 0:
+        return ""
+    ratio = min(progress_s / duration_s, 1.0)
+    pos = int(ratio * length)
+    bar = "─" * pos + "●" + "─" * (length - pos)
+    return f"▶ {bar} {format_time(progress_s)} / {format_time(duration_s)}"
+
+def embed_now_playing(title, artist, paused=False, owner=None, progress_s=0, duration_s=0):
+    bar = build_progress_bar(progress_s, duration_s)
+    description = f"**{title}**\n{artist}"
+    if bar:
+        prefix = "⏸️ " if paused else ""
+        description += f"\n\n{prefix}{bar}"
     embed = discord.Embed(
         title="Paused" if paused else "Now Playing",
-        description=f"**{title}**\n{artist}",
+        description=description,
         color=0x808080 if paused else 0x1DB954
     )
     if owner:
@@ -162,6 +175,7 @@ def get_spotify_state():
                 "artist": track["artists"][0]["name"],
                 "is_playing": playback["is_playing"],
                 "progress_s": playback["progress_ms"] / 1000,
+                "duration_s": track["duration_ms"] / 1000,
                 "shuffle": playback["shuffle_state"],
                 "repeat": playback["repeat_state"],
                 "volume": playback["device"]["volume_percent"],
@@ -170,10 +184,53 @@ def get_spotify_state():
         print(f"Spotify error: {e}")
     return None
 
-async def get_text_channel(guild: discord.Guild):
-    return discord.utils.get(guild.text_channels, name=TEXT_CHANNEL_NAME)
+_text_channel_cache = {}
 
-async def send_now_playing(title, artist, paused=False):
+async def get_text_channel(guild: discord.Guild):
+    if guild.id in _text_channel_cache:
+        return _text_channel_cache[guild.id]
+    ch = discord.utils.get(guild.text_channels, name=TEXT_CHANNEL_NAME)
+    if ch:
+        _text_channel_cache[guild.id] = ch
+    return ch
+
+async def update_presence(title=None, artist=None, paused=False):
+    if title and artist:
+        name = f"{title} by {artist}"
+        if paused:
+            await bot.change_presence(
+                status=discord.Status.idle,
+                activity=discord.Activity(type=discord.ActivityType.listening, name=f"{name} (Paused)")
+            )
+        else:
+            await bot.change_presence(
+                status=discord.Status.online,
+                activity=discord.Activity(type=discord.ActivityType.listening, name=name)
+            )
+    else:
+        await bot.change_presence(status=discord.Status.online, activity=None)
+
+async def purge_now_playing_messages(text_channel):
+    global now_playing_message
+    if now_playing_message:
+        try:
+            await now_playing_message.delete()
+        except Exception:
+            pass
+        now_playing_message = None
+    try:
+        async for msg in text_channel.history(limit=30):
+            if msg.author == bot.user and msg.embeds:
+                title_text = msg.embeds[0].title or ""
+                if title_text in ("Now Playing", "Paused"):
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+async def send_now_playing(title, artist, paused=False, progress_s=0, duration_s=0):
     global now_playing_message
     owner = bot.get_user(session_owner_id) if session_owner_id else None
     vc_channel = bot.get_channel(session_voice_channel_id)
@@ -182,13 +239,15 @@ async def send_now_playing(title, artist, paused=False):
     text_channel = await get_text_channel(vc_channel.guild)
     if not text_channel:
         return
-    embed = embed_now_playing(title, artist, paused, owner=owner)
+    await update_presence(title, artist, paused)
+    embed = embed_now_playing(title, artist, paused, owner=owner, progress_s=progress_s, duration_s=duration_s)
     if now_playing_message:
         try:
             await now_playing_message.edit(embed=embed)
             return
-        except discord.NotFound:
-            now_playing_message = None
+        except Exception:
+            pass
+    await purge_now_playing_messages(text_channel)
     now_playing_message = await text_channel.send(embed=embed)
 
 async def end_session(guild: discord.Guild):
@@ -212,6 +271,7 @@ async def end_session(guild: discord.Guild):
         except (discord.NotFound, discord.Forbidden):
             pass
     now_playing_message = None
+    await update_presence()
 
 @bot.event
 async def on_ready():
@@ -221,48 +281,60 @@ async def on_ready():
 
 @tasks.loop(seconds=2)
 async def spotify_poll(vc):
-    global current_track_id, is_spotify_paused, now_playing_message
+    global current_track_id, is_spotify_paused, now_playing_message, is_loading_track
     if not vc.is_connected():
         spotify_poll.stop()
+        return
+    if is_loading_track:
         return
     state = get_spotify_state()
     if not state:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
         current_track_id = None
-        now_playing_message = None
         return
     if state["id"] == current_track_id:
         if not state["is_playing"] and vc.is_playing():
             vc.pause()
             is_spotify_paused = True
-            await send_now_playing(state["title"], state["artist"], paused=True)
+            await send_now_playing(state["title"], state["artist"], paused=True, progress_s=state["progress_s"], duration_s=state["duration_s"])
         elif state["is_playing"] and vc.is_paused() and is_spotify_paused:
             vc.resume()
             is_spotify_paused = False
-            await send_now_playing(state["title"], state["artist"], paused=False)
+            await send_now_playing(state["title"], state["artist"], paused=False, progress_s=state["progress_s"], duration_s=state["duration_s"])
+        elif state["is_playing"] and now_playing_message:
+            owner = bot.get_user(session_owner_id) if session_owner_id else None
+            try:
+                await now_playing_message.edit(embed=embed_now_playing(state["title"], state["artist"], paused=False, owner=owner, progress_s=state["progress_s"], duration_s=state["duration_s"]))
+            except Exception:
+                pass
         return
     if not state["is_playing"]:
         return
-    current_track_id = state["id"]
-    is_spotify_paused = False
-    query = f"{state['title']} {state['artist']}"
-    print(f"Now playing: {state['title']} by {state['artist']}")
-    url = get_youtube_url(query)
-    if not url:
-        print("Could not find song on YouTube.")
-        return
-    if vc.is_playing() or vc.is_paused():
-        vc.stop()
-    await asyncio.sleep(0.3)
-    seek_seconds = max(0, state["progress_s"] - 1)
-    print(f"Seeking to {seek_seconds:.1f}s")
-    vc.play(
-        discord.FFmpegPCMAudio(url, before_options=f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {seek_seconds}", options="-vn"),
-        after=lambda e: print(f"Playback error: {e}") if e else None
-    )
-    now_playing_message = None
-    await send_now_playing(state["title"], state["artist"])
+    is_loading_track = True
+    try:
+        current_track_id = state["id"]
+        is_spotify_paused = False
+        query = f"{state['title']} {state['artist']}"
+        print(f"Now playing: {state['title']} by {state['artist']}")
+        url = await asyncio.get_event_loop().run_in_executor(None, get_youtube_url, query)
+        if not url:
+            print("Could not find song on YouTube.")
+            return
+        if vc.is_playing() or vc.is_paused():
+            vc.stop()
+        await asyncio.sleep(0.3)
+        seek_seconds = max(0, state["progress_s"] - 1)
+        print(f"Seeking to {seek_seconds:.1f}s")
+        vc.play(
+            discord.FFmpegPCMAudio(url, before_options=f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {seek_seconds}", options="-vn"),
+            after=lambda e: print(f"Playback error: {e}") if e else None
+        )
+        await send_now_playing(state["title"], state["artist"], progress_s=state["progress_s"], duration_s=state["duration_s"])
+    except Exception as e:
+        current_track_id = None
+    finally:
+        is_loading_track = False
 
 @bot.tree.command(name="join", description="Start a session and stream your Spotify to the voice channel.")
 async def join(interaction: discord.Interaction):
