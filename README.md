@@ -1,6 +1,13 @@
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/saypi)
+<img width="1280" height="720" alt="migu" src="https://github.com/user-attachments/assets/e09154c8-3ec6-434c-98c7-b66540e851e9" />
 
-# Migu
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/saypi)
+![GitHub stars](https://img.shields.io/github/stars/LeythonS/Migu?style=flat-square)
+![Last commit](https://img.shields.io/github/last-commit/LeythonS/Migu?style=flat-square)
+![Issues](https://img.shields.io/github/issues/LeythonS/Migu?style=flat-square)
+![Forks](https://img.shields.io/github/forks/LeythonS/Migu?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square)
+
+# Migu (Discord Music Bot)
 
 A Discord bot that streams any user's Spotify into a voice channel via YouTube. Users start a session with `/join`, authorize their Spotify account, and the bot follows their playback in real time.
 
