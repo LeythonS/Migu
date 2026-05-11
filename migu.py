@@ -96,8 +96,7 @@ is_spotify_paused = False
 now_playing_message = None
 pending_auths = {}
 is_loading_track = False
-
-
+last_known_progress = 0.0
 
 def format_time(seconds):
     seconds = int(seconds)
@@ -278,19 +277,45 @@ async def on_ready():
 
 @tasks.loop(seconds=2)
 async def spotify_poll(vc):
-    global current_track_id, is_spotify_paused, now_playing_message, is_loading_track
+    global current_track_id, is_spotify_paused, now_playing_message, is_loading_track, last_known_progress
     if not vc.is_connected():
         spotify_poll.stop()
         return
     if is_loading_track:
         return
-    state = get_spotify_state()
+    loop = asyncio.get_event_loop()
+    state = await loop.run_in_executor(None, get_spotify_state)
     if not state:
         if vc.is_playing() or vc.is_paused():
             vc.stop()
         current_track_id = None
         return
     if state["id"] == current_track_id:
+        expected_progress = last_known_progress + 2.0
+        seek_detected = state["is_playing"] and abs(state["progress_s"] - expected_progress) > 5.0
+        last_known_progress = state["progress_s"]
+        if seek_detected and not is_loading_track:
+            print(f"Seek detected: expected ~{expected_progress:.1f}s got {state['progress_s']:.1f}s — resyncing")
+            is_loading_track = True
+            try:
+                url = await loop.run_in_executor(None, get_youtube_url, f"{state['title']} {state['artist']}")
+                if url:
+                    fresh = await loop.run_in_executor(None, get_spotify_state)
+                    seek_to = max(0, (fresh["progress_s"] if fresh and fresh["id"] == state["id"] else state["progress_s"]) - 0.5)
+                    if vc.is_playing() or vc.is_paused():
+                        vc.stop()
+                    await asyncio.sleep(0.2)
+                    print(f"Resyncing to {seek_to:.1f}s")
+                    vc.play(
+                        discord.FFmpegPCMAudio(url, before_options=f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {seek_to}", options="-vn"),
+                        after=lambda e: print(f"Playback error: {e}") if e else None
+                    )
+                    await send_now_playing(state["title"], state["artist"], progress_s=seek_to, duration_s=state["duration_s"], album_art=state.get("album_art"))
+            except Exception as e:
+                print(f"Resync error: {e}")
+            finally:
+                is_loading_track = False
+            return
         if not state["is_playing"] and vc.is_playing():
             vc.pause()
             is_spotify_paused = True
@@ -312,26 +337,31 @@ async def spotify_poll(vc):
     try:
         current_track_id = state["id"]
         is_spotify_paused = False
+        last_known_progress = state["progress_s"]
         query = f"{state['title']} {state['artist']}"
         print(f"Now playing: {state['title']} by {state['artist']}")
-        url = await asyncio.get_event_loop().run_in_executor(None, get_youtube_url, query)
+        url = await loop.run_in_executor(None, get_youtube_url, query)
         if not url:
             print("Could not find song on YouTube.")
             return
+        fresh_state = await loop.run_in_executor(None, get_spotify_state)
+        seek_seconds = max(0, (fresh_state["progress_s"] if fresh_state and fresh_state["id"] == state["id"] else state["progress_s"]) - 0.5)
         if vc.is_playing() or vc.is_paused():
             vc.stop()
-        await asyncio.sleep(0.3)
-        seek_seconds = max(0, state["progress_s"] - 1)
+        await asyncio.sleep(0.2)
         print(f"Seeking to {seek_seconds:.1f}s")
         vc.play(
             discord.FFmpegPCMAudio(url, before_options=f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {seek_seconds}", options="-vn"),
             after=lambda e: print(f"Playback error: {e}") if e else None
         )
-        await send_now_playing(state["title"], state["artist"], progress_s=state["progress_s"], duration_s=state["duration_s"], album_art=state.get("album_art"))
+        display_state = fresh_state if fresh_state and fresh_state["id"] == state["id"] else state
+        await send_now_playing(display_state["title"], display_state["artist"], progress_s=display_state["progress_s"], duration_s=display_state["duration_s"], album_art=display_state.get("album_art"))
     except Exception as e:
+        print(f"Track load error: {e}")
         current_track_id = None
     finally:
         is_loading_track = False
+last_known_progress = 0.0
 
 @bot.tree.command(name="join", description="Start a session and stream your Spotify to the voice channel.")
 async def join(interaction: discord.Interaction):
